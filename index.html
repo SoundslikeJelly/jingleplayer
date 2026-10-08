@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body style="background:#000;color:#fff;text-align:center;font-family:sans-serif">
+<button id="start" style="font-size:3em;margin-top:30vh">Tik om te starten</button>
+<script>
+const spelers = {};
+
+document.getElementById('start').onclick = async () => {
+  const lijst = await (await fetch('/lijst')).json();
+
+  // Alle jingles vooraf laden en op iOS "ontgrendelen"
+  for (const naam of lijst) {
+    const a = new Audio('/jingles/' + encodeURIComponent(naam));
+    a.preload = 'auto';
+    await a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+    spelers[naam] = a;
+  }
+
+  const ws = new WebSocket('ws://' + location.host);
+  ws.onmessage = e => {
+    const a = spelers[e.data];
+    if (a) { a.currentTime = 0; a.play(); }
+  };
+  document.getElementById('start').textContent = 'Verbonden (' + lijst.length + ' jingles)';
+};
+</script>
+</body>
+</html>
