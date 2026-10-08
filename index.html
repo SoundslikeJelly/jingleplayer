@@ -1,27 +1,84 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jingles</title>
+</head>
 <body style="background:#000;color:#fff;text-align:center;font-family:sans-serif">
-<button id="start" style="font-size:3em;margin-top:30vh">Tik om te starten</button>
+<button id="start" style="font-size:3em;margin-top:25vh">Tik om te starten</button>
+<p id="status" style="font-size:1.5em"></p>
+<p id="laatste" style="font-size:1.2em;color:#aaa"></p>
 <script>
-const spelers = {};
+const knop = document.getElementById('start');
+const status = document.getElementById('status');
+const laatste = document.getElementById('laatste');
 
-document.getElementById('start').onclick = async () => {
-  const lijst = await (await fetch('/lijst')).json();
+knop.onclick = async () => {
+  knop.disabled = true;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.resume();
 
-  // Alle jingles vooraf laden en op iOS "ontgrendelen"
-  for (const naam of lijst) {
-    const a = new Audio('/jingles/' + encodeURIComponent(naam));
-    a.preload = 'auto';
-    await a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
-    spelers[naam] = a;
+    status.textContent = 'Jingles laden...';
+    const lijst = await (await fetch('/lijst')).json();
+    const buffers = {};
+    const mislukt = [];
+
+    for (const naam of lijst) {
+      try {
+        const data = await (await fetch('/jingles/' + encodeURIComponent(naam))).arrayBuffer();
+        buffers[naam] = await new Promise((ok, fout) => ctx.decodeAudioData(data, ok, fout));
+      } catch (err) {
+        mislukt.push(naam);
+      }
+    }
+
+    knop.textContent = Object.keys(buffers).length + ' van ' + lijst.length + ' jingles geladen';
+    if (mislukt.length) {
+      laatste.textContent = 'Kan niet laden: ' + mislukt.join(', ');
+    }
+
+    function verbind() {
+      const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+
+      ws.onopen = () => {
+        status.textContent = 'WebSocket verbonden';
+        status.style.color = '#4f4';
+      };
+
+      ws.onmessage = e => {
+        const b = buffers[e.data];
+        if (!b) {
+          laatste.textContent = 'Onbekend of niet geladen: ' + e.data;
+          return;
+        }
+        if (ctx.state !== 'running') ctx.resume();
+        const s = ctx.createBufferSource();
+        s.buffer = b;
+        s.connect(ctx.destination);
+        s.start();
+        laatste.textContent = 'Speelt: ' + e.data;
+      };
+
+      ws.onerror = () => {
+        status.textContent = 'WebSocket fout';
+        status.style.color = '#f44';
+      };
+
+      ws.onclose = () => {
+        status.textContent = 'Verbinding weg, opnieuw proberen...';
+        status.style.color = '#fa0';
+        setTimeout(verbind, 1000);
+      };
+    }
+
+    verbind();
+  } catch (err) {
+    status.textContent = 'Fout: ' + err;
+    status.style.color = '#f44';
+    knop.disabled = false;
   }
-
-  const ws = new WebSocket('ws://' + location.host);
-  ws.onmessage = e => {
-    const a = spelers[e.data];
-    if (a) { a.currentTime = 0; a.play(); }
-  };
-  document.getElementById('start').textContent = 'Verbonden (' + lijst.length + ' jingles)';
 };
 </script>
 </body>
